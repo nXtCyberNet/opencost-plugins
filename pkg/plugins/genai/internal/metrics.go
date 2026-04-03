@@ -62,9 +62,10 @@ type MetricMapping struct {
 // DefaultMetricMapping provides a sane baseline for most K8s environments.
 func DefaultMetricMapping() MetricMapping {
 	return MetricMapping{
-		InputTokens:    "genai_input_tokens_total",
-		OutputTokens:   "genai_output_tokens_total",
-		GPUUtilization: "container_gpu_utilization",
+		InputTokens:    "vllm:prompt_tokens_total",
+		OutputTokens:   "vllm:generation_tokens_total",
+		GPUUtilization: "DCGM_FI_DEV_GPU_UTIL",
+		GPUActiveSec:   "DCGM_FI_DEV_GPU_UTIL",
 		PodLabel:       "pod",
 		NamespaceLabel: "namespace",
 		NodeLabel:      "node",
@@ -72,4 +73,24 @@ func DefaultMetricMapping() MetricMapping {
 		TenantLabel:    "tenant",
 		WorkflowLabel:  "workflow",
 	}
+}
+
+// GetMapping generates a MetricMapping optionally overridden by Pod annotations.
+func GetMapping(annotations map[string]string) MetricMapping {
+	m := DefaultMetricMapping()
+
+	if val, ok := annotations["opencost.io/metric-input"]; ok {
+		m.InputTokens = val
+	}
+	if val, ok := annotations["opencost.io/metric-output"]; ok {
+		m.OutputTokens = val
+	}
+	if val, ok := annotations["opencost.io/metric-gpu-sec"]; ok {
+		m.GPUActiveSec = val
+	}
+	if val, ok := annotations["opencost.io/metric-gpu-util"]; ok {
+		m.GPUUtilization = val
+	}
+
+	return m
 }

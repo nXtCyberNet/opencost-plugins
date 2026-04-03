@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -94,34 +96,55 @@ type GenAIWorkload struct {
 	WorkflowPhase string
 	MIGProfile    string
 	GPUEfficiency float64
+	Efficiency    EfficiencyMetrics
+	Attributes    GenAIAttributes
 }
 
 // CalculateGenAIWorkloads fetches metrics and calculates costs for GenAI workloads
 func CalculateGenAIWorkloads(start, end time.Time, config *genaiprovider.Config) ([]GenAIWorkload, error) {
-	// TODO: Implement the actual Prometheus fetching and MIG-to-Node join logic
-	// This is a placeholder implementation to satisfy the interface
+	if config.PrometheusURL == "" {
+		return nil, fmt.Errorf("prometheus URL is not configured")
+	}
 
-	workloads := []GenAIWorkload{
-		{
-			PodName:       "genai-inference-pod",
-			ModelName:     "gpt-4",
-			TotalTokens:   1000,
-			TotalCost:     0.02,
-			TenantID:      "tenant-1",
-			WorkflowPhase: "inference",
-			MIGProfile:    "1g.5gb",
-			GPUEfficiency: 85.5,
-		},
-		{
-			PodName:       "genai-training-pod",
-			ModelName:     "llama-2",
-			TotalTokens:   5000,
-			TotalCost:     0.15,
-			TenantID:      "tenant-2",
-			WorkflowPhase: "training",
-			MIGProfile:    "3g.20gb",
-			GPUEfficiency: 92.3,
-		},
+	querier, err := NewHttpPrometheusQuerier(config.PrometheusURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create prometheus client: %w", err)
+	}
+
+	provider := NewPrometheusProvider(querier)
+	metricsMap, err := provider.Fetch(context.Background(), start, end, DefaultMetricMapping())
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch metrics: %w", err)
+	}
+
+	var workloads []GenAIWorkload
+	for _, m := range metricsMap {
+		// In a real implementation, podCost and nodeCap would be fetched from OpenCost's Core API.
+		// For now, we stub them to satisfy the metric join requirements safely.
+		podCost := 0.0
+		nodeCap := make(NodeCapacityMap)
+
+		attr := GenAIAttributes{
+			WorkflowPhase: m.WorkflowPhase,
+			ModelName:     m.ModelName,
+			// Tenant, Version, etc. could also be mapped if available from annotations or metrics
+		}
+
+		report := JoinPodToNodeMetrics(m, nodeCap, podCost, attr)
+		migProfile, _ := FindMIGProfile(m.PodRequests)
+
+		workloads = append(workloads, GenAIWorkload{
+			PodName:       m.Pod, // Formatted as namespace/pod in metricsMap, mapResults populated Pod specifically
+			ModelName:     m.ModelName,
+			TotalTokens:   int64(m.InputTokens + m.OutputTokens),
+			TotalCost:     podCost,
+			TenantID:      attr.TenantID,
+			WorkflowPhase: m.WorkflowPhase,
+			MIGProfile:    migProfile,
+			GPUEfficiency: report.Stats.GPUUtilPercent,
+			Efficiency:    report.Stats,
+			Attributes:    report.Attributes,
+		})
 	}
 
 	return workloads, nil

@@ -37,6 +37,26 @@ func (s *GenAISource) GetCustomCosts(req *genaiprovider.CustomCostRequest) ([]*g
 			WorkflowPhase: w.WorkflowPhase,
 			MIGProfile:    w.MIGProfile,
 			GPUEfficiency: w.GPUEfficiency,
+			Efficiency: &genaiprovider.EfficiencyMetricsData{
+				CostPer1MInput:  w.Efficiency.CostPer1MInput,
+				CostPer1MOutput: w.Efficiency.CostPer1MOutput,
+				CostPer1MTotal:  w.Efficiency.CostPer1MTotal,
+				TokensPerGPUSec: w.Efficiency.TokensPerGPUSec,
+				CacheSavings:    w.Efficiency.CacheSavings,
+				GPUUtilPercent:  w.Efficiency.GPUUtilPercent,
+				GPUWaste:        w.Efficiency.GPUWaste,
+				EfficiencyStatus: w.Efficiency.EfficiencyStatus,
+				MIGUtilization:  w.Efficiency.MIGUtilization,
+				UnallocatedCost: w.Efficiency.UnallocatedCost,
+			},
+			Attributes: &genaiprovider.GenAIAttributesData{
+				WorkflowPhase: w.Attributes.WorkflowPhase,
+				ModelName:     w.Attributes.ModelName,
+				ModelVersion:  w.Attributes.ModelVersion,
+				TenantID:      w.Attributes.TenantID,
+				Accelerator:   w.Attributes.Accelerator,
+				GPUUUID:       w.Attributes.GPUUUID,
+			},
 		})
 	}
 

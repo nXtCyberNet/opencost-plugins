@@ -5,13 +5,32 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/prometheus/client_golang/api"
+	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
 )
 
+// HttpPrometheusQuerier implements PrometheusQuerier using the standard client.
+type HttpPrometheusQuerier struct {
+	api v1.API
+}
+
+func NewHttpPrometheusQuerier(url string) (*HttpPrometheusQuerier, error) {
+	client, err := api.NewClient(api.Config{Address: url})
+	if err != nil {
+		return nil, err
+	}
+	return &HttpPrometheusQuerier{api: v1.NewAPI(client)}, nil
+}
+
+func (q *HttpPrometheusQuerier) Query(ctx context.Context, query string) (interface{}, error) {
+	val, _, err := q.api.Query(ctx, query, time.Now())
+	return val, err
+}
+
 // This allows decoupling from the prometheus-source module
 type PrometheusQuerier interface {
-	Query(query string) (interface{}, error)
-	QueryWithContext(ctx context.Context, query string) (interface{}, error)
+	Query(ctx context.Context, query string) (interface{}, error)
 }
 
 type PrometheusProvider struct {
@@ -35,31 +54,42 @@ func (p *PrometheusProvider) buildQuery(metric string, window time.Duration, isC
 
 // 2. Simple execution wrapper
 func (p *PrometheusProvider) execute(ctx context.Context, query string) (model.Vector, error) {
-	// Re-using the existing OpenCost Query interface
-	val, err := p.querier.Query(query)
+	// Use Context-aware querying
+	val, err := p.querier.Query(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 
-	vector, ok := val.(model.Vector)
-	if !ok {
-		return nil, fmt.Errorf("unexpected prometheus result type")
+	switch v := val.(type) {
+	case model.Vector:
+		return v, nil
+	case *model.Vector:
+		if v == nil {
+			return nil, fmt.Errorf("prometheus returned nil vector")
+		}
+		return *v, nil
+	default:
+		return nil, fmt.Errorf("unexpected prometheus result type: %T", val)
 	}
-	return vector, nil
 }
 
 // 3. Mapping logic for standardizing output
-func (p *PrometheusProvider) mapResults(vector model.Vector, results map[string]*Metrics, key string) {
+func (p *PrometheusProvider) mapResults(vector model.Vector, results map[string]*Metrics, key string, mapping MetricMapping) {
 	for _, sample := range vector {
-		pod := string(sample.Metric["pod"])
-		ns := string(sample.Metric["namespace"])
+		pod := string(sample.Metric[model.LabelName(mapping.PodLabel)])
+		ns := string(sample.Metric[model.LabelName(mapping.NamespaceLabel)])
 		if pod == "" || ns == "" {
 			continue
 		}
 
 		id := fmt.Sprintf("%s/%s", ns, pod)
 		if _, ok := results[id]; !ok {
-			results[id] = &Metrics{}
+			results[id] = &Metrics{
+				Pod:           pod,
+				Namespace:     ns,
+				ModelName:     string(sample.Metric[model.LabelName(mapping.ModelLabel)]),
+				WorkflowPhase: string(sample.Metric[model.LabelName(mapping.WorkflowLabel)]),
+			}
 		}
 
 		val := float64(sample.Value)
@@ -98,7 +128,7 @@ func (p *PrometheusProvider) Fetch(ctx context.Context, start, end time.Time, ma
 		if err != nil {
 			return nil, fmt.Errorf("fetch error for %s: %w", s.id, err)
 		}
-		p.mapResults(v, results, s.id)
+		p.mapResults(v, results, s.id, mapping)
 	}
 
 	return results, nil
