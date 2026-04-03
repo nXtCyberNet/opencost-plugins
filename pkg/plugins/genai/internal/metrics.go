@@ -49,6 +49,7 @@ type MetricMapping struct {
 	GPUActiveSec   string `json:"gpuActiveSec"`
 
 	// Label Overrides (to handle different Prometheus exporters)
+	ClusterLabel   string `json:"clusterLabel"`
 	PodLabel       string `json:"podLabel"`
 	NamespaceLabel string `json:"namespaceLabel"`
 	NodeLabel      string `json:"nodeLabel"`
@@ -66,6 +67,7 @@ func DefaultMetricMapping() MetricMapping {
 		OutputTokens:   "vllm:generation_tokens_total",
 		GPUUtilization: "DCGM_FI_DEV_GPU_UTIL",
 		GPUActiveSec:   "DCGM_FI_DEV_GPU_UTIL",
+		ClusterLabel:   "cluster",
 		PodLabel:       "pod",
 		NamespaceLabel: "namespace",
 		NodeLabel:      "node",
@@ -90,6 +92,9 @@ func GetMapping(annotations map[string]string) MetricMapping {
 	}
 	if val, ok := annotations["opencost.io/metric-gpu-util"]; ok {
 		m.GPUUtilization = val
+	}
+	if val, ok := annotations["opencost.io/metric-cluster-label"]; ok {
+		m.ClusterLabel = val
 	}
 
 	return m

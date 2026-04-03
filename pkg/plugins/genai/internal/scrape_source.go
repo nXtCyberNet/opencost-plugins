@@ -48,28 +48,61 @@ func (s *Scraper) parseToFamilies(data io.Reader) (map[string]*dto.MetricFamily,
 	return parser.TextToMetricFamilies(data)
 }
 
-// Updated mapping logic for the DTO structs
-func (s *Scraper) extractMetricValue(families map[string]*dto.MetricFamily, name string) float64 {
-	family, ok := families[name]
+// Updated mapping logic for the DTO structs to extract dimensions
+func (s *Scraper) extractMetricsByLabels(families map[string]*dto.MetricFamily, mappedName string, mapping MetricMapping, results map[string]*Metrics, metricKey string) {
+	family, ok := families[mappedName]
 	if !ok || family == nil {
-		return 0
+		return
 	}
 
-	var sum float64
 	for _, m := range family.Metric {
-		// Prometheus DTO uses pointers for values
+		var val float64
 		if m.Counter != nil && m.Counter.Value != nil {
-			sum += *m.Counter.Value
+			val = *m.Counter.Value
 		} else if m.Gauge != nil && m.Gauge.Value != nil {
-			sum += *m.Gauge.Value
+			val = *m.Gauge.Value
 		} else if m.Untyped != nil && m.Untyped.Value != nil {
-			sum += *m.Untyped.Value
+			val = *m.Untyped.Value
+		}
+
+		labels := make(map[string]string)
+		for _, lp := range m.Label {
+			if lp.Name != nil && lp.Value != nil {
+				labels[*lp.Name] = *lp.Value
+			}
+		}
+
+		cluster := labels[mapping.ClusterLabel]
+		pod := labels[mapping.PodLabel]
+		ns := labels[mapping.NamespaceLabel]
+		modelName := labels[mapping.ModelLabel]
+		workflowPhase := labels[mapping.WorkflowLabel]
+
+		key := fmt.Sprintf("%s/%s/%s/%s/%s", cluster, ns, pod, modelName, workflowPhase)
+		if _, ok := results[key]; !ok {
+			results[key] = &Metrics{
+				Cluster:       cluster,
+				Namespace:     ns,
+				Pod:           pod,
+				ModelName:     modelName,
+				WorkflowPhase: workflowPhase,
+			}
+		}
+
+		switch metricKey {
+		case "input":
+			results[key].InputTokens += val
+		case "output":
+			results[key].OutputTokens += val
+		case "gpuSec":
+			results[key].GPUActiveSec += val
+		case "util":
+			results[key].GPUUtilPercent += val
 		}
 	}
-	return sum
 }
 
-func (s *Scraper) Scrape(ctx context.Context, ip, port string, mapping MetricMapping) (*Metrics, error) {
+func (s *Scraper) Scrape(ctx context.Context, ip, port string, mapping MetricMapping) ([]*Metrics, error) {
 	url := fmt.Sprintf("http://%s:%s/metrics", ip, port)
 
 	raw, err := s.fetchRawMetrics(ctx, url)
@@ -83,10 +116,16 @@ func (s *Scraper) Scrape(ctx context.Context, ip, port string, mapping MetricMap
 		return nil, err
 	}
 
-	return &Metrics{
-		InputTokens:    s.extractMetricValue(families, mapping.InputTokens),
-		OutputTokens:   s.extractMetricValue(families, mapping.OutputTokens),
-		GPUActiveSec:   s.extractMetricValue(families, mapping.GPUActiveSec),
-		GPUUtilPercent: s.extractMetricValue(families, mapping.GPUUtilization),
-	}, nil
+	results := make(map[string]*Metrics)
+	s.extractMetricsByLabels(families, mapping.InputTokens, mapping, results, "input")
+	s.extractMetricsByLabels(families, mapping.OutputTokens, mapping, results, "output")
+	s.extractMetricsByLabels(families, mapping.GPUActiveSec, mapping, results, "gpuSec")
+	s.extractMetricsByLabels(families, mapping.GPUUtilization, mapping, results, "util")
+
+	var ret []*Metrics
+	for _, m := range results {
+		ret = append(ret, m)
+	}
+
+	return ret, nil
 }

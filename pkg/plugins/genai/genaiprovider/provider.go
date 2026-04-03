@@ -28,6 +28,7 @@ func (p *CustomCostPlugin) GRPCClient(ctx context.Context, broker *plugin.GRPCBr
 // Config represents the configuration for the GenAI plugin
 type Config struct {
 	PrometheusURL string `json:"prometheus_url"`
+	OpenCostURL   string `json:"opencost_url"`
 	ClusterID     string `json:"cluster_id"`
 	LogLevel      string `json:"log_level"`
 }
@@ -47,6 +48,9 @@ func LoadConfig(configPath string) (*Config, error) {
 
 	if config.LogLevel == "" {
 		config.LogLevel = "info"
+	}
+	if config.OpenCostURL == "" {
+		config.OpenCostURL = "http://localhost:9003"
 	}
 
 	return &config, nil

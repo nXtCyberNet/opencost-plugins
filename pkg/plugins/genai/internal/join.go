@@ -112,16 +112,32 @@ func CalculateGenAIWorkloads(start, end time.Time, config *genaiprovider.Config)
 	}
 
 	provider := NewPrometheusProvider(querier)
-	metricsMap, err := provider.Fetch(context.Background(), start, end, DefaultMetricMapping())
+	metricsMap, err := provider.Fetch(context.Background(), start, end, DefaultMetricMapping(), config.ClusterID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch metrics: %w", err)
 	}
 
+	// Fetch actual pod costs from OpenCost
+	openCostURL := config.OpenCostURL
+	if openCostURL == "" {
+		openCostURL = "http://localhost:9003"
+	}
+	podCosts, err := FetchPodCosts(openCostURL, start, end)
+	if err != nil {
+		// Log error but gracefully continue? OpenCost might be down. Better to fail fast since it's the core prop.
+		return nil, fmt.Errorf("failed to fetch pod costs from OpenCost: %w", err)
+	}
+
 	var workloads []GenAIWorkload
 	for _, m := range metricsMap {
-		// In a real implementation, podCost and nodeCap would be fetched from OpenCost's Core API.
-		// For now, we stub them to satisfy the metric join requirements safely.
-		podCost := 0.0
+		// Try to lookup cost by namespace/pod. Fallbacks for standard OpenCost ID.
+		podKey := fmt.Sprintf("%s/%s", m.Namespace, m.Pod)
+		podCost := podCosts[podKey]
+		if podCost <= 0 {
+			// Sometime OpenCost formats it differently like cluster/namespace/pod
+			podCost = podCosts[fmt.Sprintf("%s/%s/%s", m.Cluster, m.Namespace, m.Pod)]
+		}
+
 		nodeCap := make(NodeCapacityMap)
 
 		attr := GenAIAttributes{
