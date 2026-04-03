@@ -128,6 +128,16 @@ func CalculateGenAIWorkloads(start, end time.Time, config *genaiprovider.Config)
 		return nil, fmt.Errorf("failed to fetch pod costs from OpenCost: %w", err)
 	}
 
+	podRequests, err := provider.FetchMIGRequests(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch mig requests: %w", err)
+	}
+
+	nodeCap, err := provider.FetchNodeMIGCapacity(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch node mig capacity: %w", err)
+	}
+
 	var workloads []GenAIWorkload
 	for _, m := range metricsMap {
 		// Try to lookup cost by namespace/pod. Fallbacks for standard OpenCost ID.
@@ -138,7 +148,9 @@ func CalculateGenAIWorkloads(start, end time.Time, config *genaiprovider.Config)
 			podCost = podCosts[fmt.Sprintf("%s/%s/%s", m.Cluster, m.Namespace, m.Pod)]
 		}
 
-		nodeCap := make(NodeCapacityMap)
+		if reqs, ok := podRequests[podKey]; ok {
+			m.PodRequests = reqs
+		}
 
 		attr := GenAIAttributes{
 			WorkflowPhase: m.WorkflowPhase,

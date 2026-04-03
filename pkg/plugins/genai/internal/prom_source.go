@@ -140,3 +140,48 @@ func (p *PrometheusProvider) Fetch(ctx context.Context, start, end time.Time, ma
 
 	return results, nil
 }
+
+// FetchMIGRequests fetches pod-level MIG requests.
+func (p *PrometheusProvider) FetchMIGRequests(ctx context.Context) (map[string]map[string]float64, error) {
+	query := `kube_pod_container_resource_requests{resource=~"nvidia.com/mig-.*"}`
+	val, err := p.execute(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("mig requests error: %w", err)
+	}
+
+	results := make(map[string]map[string]float64)
+	for _, sample := range val {
+		pod := string(sample.Metric["pod"])
+		ns := string(sample.Metric["namespace"])
+		resource := string(sample.Metric["resource"])
+		if pod == "" || ns == "" || resource == "" {
+			continue
+		}
+
+		id := fmt.Sprintf("%s/%s", ns, pod)
+		if _, ok := results[id]; !ok {
+			results[id] = make(map[string]float64)
+		}
+		results[id][resource] = float64(sample.Value)
+	}
+	return results, nil
+}
+
+// FetchNodeMIGCapacity fetches total MIG capacities across nodes.
+func (p *PrometheusProvider) FetchNodeMIGCapacity(ctx context.Context) (NodeCapacityMap, error) {
+	query := `kube_node_status_capacity{resource=~"nvidia.com/mig-.*"}`
+	val, err := p.execute(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("node mig capacity error: %w", err)
+	}
+
+	results := make(NodeCapacityMap)
+	for _, sample := range val {
+		resource := string(sample.Metric["resource"])
+		if resource == "" {
+			continue
+		}
+		results[resource] += float64(sample.Value)
+	}
+	return results, nil
+}
